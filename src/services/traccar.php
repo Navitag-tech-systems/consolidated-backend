@@ -125,4 +125,116 @@ class Traccar {
             return ['error' => 'Failed to fetch server info', 'message' => $e->getMessage()];
         }
     }
+
+    /**
+     * Delete an existing User
+     * @param int $id The Traccar User ID
+     */
+    public function deleteUser(int $id) {
+        try {
+            // Sends a DELETE request to the specific user resource
+            $response = $this->client->request('DELETE', "users/{$id}");
+
+            // Traccar usually returns 204 No Content on successful deletion
+            if ($response->getStatusCode() === 204) {
+                return ['status' => 'success', 'message' => 'User deleted from Traccar'];
+            }
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to delete user', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Create a new Device
+     * @param array $deviceData ['name' => 'Device Name', 'uniqueId' => '1234567890']
+     */
+    public function createDevice(array $deviceData) {
+        try {
+            // 'name' and 'uniqueId' are required by Traccar
+            $response = $this->client->request('POST', 'devices', [
+                'json' => $deviceData
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to create device', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Update a Device (e.g., change name)
+     * Note: Traccar usually requires 'uniqueId' to be present even when just updating the name.
+     * * @param int $id The Traccar Device ID
+     * @param array $deviceData ['name' => 'New Name', 'uniqueId' => '...']
+     */
+    public function updateDevice(int $id, array $deviceData) {
+        try {
+            $deviceData['id'] = $id; // ID is required in the body
+            
+            $response = $this->client->request('PUT', "devices/{$id}", [
+                'json' => $deviceData
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to update device', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Delete a Device
+     * @param int $id The Traccar Device ID
+     */
+    public function deleteDevice(int $id) {
+        try {
+            $response = $this->client->request('DELETE', "devices/{$id}");
+
+            if ($response->getStatusCode() === 204) {
+                return ['status' => 'success', 'message' => 'Device deleted'];
+            }
+            
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to delete device', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Get a single device by ID
+     */
+    public function getDevice(int $deviceId) {
+        try {
+            // Traccar API filters by id parameter
+            $response = $this->client->request('GET', 'devices', [
+                'query' => ['id' => $deviceId]
+            ]);
+            $devices = json_decode($response->getBody()->getContents(), true);
+            return !empty($devices) ? $devices[0] : null;
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to fetch device', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Unlink a User from a Device (Reverse of linkUserToDevice)
+     */
+    public function unlinkUserFromDevice(int $userId, int $deviceId) {
+        try {
+            $payload = ['userId' => $userId, 'deviceId' => $deviceId];
+            // DELETE request to permissions endpoint
+            $response = $this->client->request('DELETE', 'permissions', [
+                'json' => $payload
+            ]);
+
+            if ($response->getStatusCode() === 204 || $response->getStatusCode() === 200) {
+                return ['status' => 'success', 'message' => 'Device unlinked from user'];
+            }
+            
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to unlink device', 'message' => $e->getMessage()];
+        }
+    }
 }
