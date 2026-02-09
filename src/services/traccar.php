@@ -8,7 +8,7 @@ use GuzzleHttp\Exception\GuzzleException;
 class Traccar {
     private $client;
 
-    public function __construct($baseUrl) {
+    public function __construct(string $baseUrl) {
         // Retrieve configuration directly from environment variables
         $username = $_ENV['TRACCAR_ADMIN_USER'] ?? ''; // This is usually the admin email
         $password = $_ENV['TRACCAR_ADMIN_PASS'] ?? '';
@@ -16,6 +16,7 @@ class Traccar {
         $this->client = new Client([
             'base_uri' => rtrim($baseUrl, '/') . '/api/',
             'timeout'  => 5.0,
+            'verify' => false,
             'headers' => [
                 'Accept' => 'application/json',
                 'Content-Type' => 'application/json',
