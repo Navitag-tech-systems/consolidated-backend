@@ -237,4 +237,24 @@ class Traccar {
             return ['error' => 'Failed to unlink device', 'message' => $e->getMessage()];
         }
     }
+
+    /**
+     * Generate a temporary Login Token for the user.
+     */
+    public function createUserToken(string $email, string $password) {
+        try {
+            // 1. We must use Basic Auth (User Creds) to ask for a token
+            $response = $this->client->request('POST', 'session/token', [
+                'auth' => [$email, $password], // Traccar requires Basic Auth here
+                'form_params' => [
+                    'expiration' => date('c', strtotime('+24 Hours')) // Token valid for 5 mins
+                ]
+            ]);
+
+            // The body contains the token string (e.g., "g7S...")
+            return $response->getBody()->getContents();
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to generate token', 'message' => $e->getMessage()];
+        }
+    }
 }

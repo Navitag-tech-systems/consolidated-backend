@@ -75,6 +75,32 @@ $app->post('/status', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
+$app->get('/status', function (Request $request, Response $response) {
+    //$data = $request->getParsedBody();
+    $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_TEST_URL'];
+    
+    $db = $this->get('db');
+    $simbase = $this->get('simbase');
+    $traccar = ($this->get('traccarFactory'))($serverUrl);
+
+    $results = [
+        'timestamp' => date('c'),
+        'services' => [
+            'mysql' => $db->fetchOne("SELECT 1 as alive") 
+                       |> (fn($res) => isset($res['error']) ? ['status' => 'error', 'message' => $res['message']] : ['status' => 'online']),
+            
+            'traccar' => $traccar->getServerInfo() 
+                         |> (fn($info) => isset($info['error']) ? ['status' => 'error', 'message' => $info['message']] : ['status' => 'online', 'version' => $info['version'] ?? 'unknown']),
+            
+            'simbase' => $simbase->getAccountBalance() 
+                         |> (fn($bal) => isset($bal['error']) ? ['status' => 'error', 'message' => $bal['errors'] ?? 'Unknown'] : ['status' => 'online', 'balance' => $bal['balance'] ?? 0])
+        ]
+    ];
+
+    $response->getBody()->write(json_encode($results, JSON_PRETTY_PRINT));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
 /**
  * POST /users/sync
  */
@@ -203,5 +229,50 @@ $app->post('/device/add', function (Request $request, Response $response) {
         return $response->withStatus(500);
     }
 });
+
+/**
+ * POST /server/token
+ * Returns a temporary Traccar login token.
+ */
+$app->post('/server/token', function (Request $request, Response $response) {
+    // 1. Identify User (from Firebase Middleware)
+    $firebaseUser = $request->getAttribute('firebase_user');
+    $firebaseemail = $firebaseUser['email'];
+    $data = $request->getParsedBody();
+
+    if($data["email"] !== $firebaseemail) {
+        $response->getBody()->write(json_encode([
+            'error' => 'Email mismatch',
+            'message' => 'The email provided does not match the authenticated Firebase user.'
+        ]));
+        return $response->withStatus(403);
+    }
+    
+    $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_DEFAULT_URL'];
+
+    // 2. Re-calculate the "Encoded Password" (Same logic as user creation)
+    $password = base64_encode($firebaseemail) 
+                |> (fn($s) => strtr($s, '+/', '-_')) 
+                |> (fn($s) => rtrim($s, '='));
+
+    // 3. Get Traccar Token
+    $data = $request->getParsedBody();
+    $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_DEFAULT_URL'];
+    
+    $traccar = ($this->get('traccarFactory'))($serverUrl);
+    $token = $traccar->createUserToken($email, $password);
+
+    if (is_array($token) && isset($token['error'])) {
+        $response->getBody()->write(json_encode($token));
+        return $response->withStatus(500);
+    }
+
+    // 4. Return Token to Frontend
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'traccar_token' => $token
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+})->add($container->get(FirebaseAuthMiddleware::class));
 
 $app->run();
