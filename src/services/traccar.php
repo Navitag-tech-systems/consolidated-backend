@@ -14,7 +14,7 @@ class Traccar {
         $password = $_ENV['TRACCAR_ADMIN_PASS'] ?? '';
 
         $this->client = new Client([
-            'base_uri' => rtrim($baseUrl, '/') . '/api/',
+            'base_uri' => 'https://' . $baseUrl . '/api/',
             'timeout'  => 5.0,
             'verify' => false,
             'headers' => [

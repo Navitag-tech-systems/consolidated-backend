@@ -28,8 +28,7 @@ $container->set(FirebaseProvider::class, fn() => new FirebaseProvider());
 // Traccar Factory for dynamic domains
 $container->set('traccarFactory', function () {
     return function (string $domain) {
-        $baseUrl = "https://" . ltrim($domain, 'htps:/'); 
-        return new Traccar($baseUrl);
+        return new Traccar($domain);
     };
 });
 
