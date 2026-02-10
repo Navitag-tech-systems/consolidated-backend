@@ -10,10 +10,11 @@ use App\Services\Simbase;
 use App\Services\FirebaseProvider; // New Service
 // use App\Middleware\FirebaseAuthMiddleware; // New Middleware
 
-require __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/vendor/autoload.php';
+
 
 // 1. Load Environment Variables
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
 // 2. Initialize DI Container
@@ -36,6 +37,7 @@ $container->set('traccarFactory', function () {
 AppFactory::setContainer($container);
 $app = AppFactory::create();
 
+$app->setBasePath('/v1');
 $app->addBodyParsingMiddleware();
 $app->addErrorMiddleware(true, true, true);
 
@@ -75,7 +77,7 @@ $app->post('/status', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-$app->get('/status', function (Request $request, Response $response) {
+$app->get('/status-test', function (Request $request, Response $response) {
     //$data = $request->getParsedBody();
     $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_TEST_URL'];
     

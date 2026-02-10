@@ -1,0 +1,15 @@
+RewriteEngine On
+RewriteBase /v1/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+
+# Block access to sensitive files
+<FilesMatch "^\.env|composer\.(json|lock)|.*\.json$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block access to the src and vendor directories
+RewriteRule ^(src|vendor|project_secret) - [F,L]
