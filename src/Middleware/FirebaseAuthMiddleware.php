@@ -5,12 +5,25 @@ namespace App\Middleware;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\RequestHandlerInterface as Handler;
 use Slim\Psr7\Response;
-use App\Services\FirebaseProvider;
+use App\Services\Firebase;
 
 class FirebaseAuthMiddleware {
-    public function __construct(private readonly FirebaseProvider $firebase) {}
+    public function __construct(private readonly Firebase $firebase) {}
 
     public function __invoke(Request $request, Handler $handler): Response {
+        // 1. Check for Admin Key Bypass
+        $adminKey = $request->getHeaderLine('X-Admin-Key');
+        $expectedKey = $_ENV['ADMIN_KEY'] ?? null;
+
+        if ($expectedKey && $adminKey === $expectedKey) {
+            // Bypass: Attach a mock admin user so downstream routes don't crash
+            $request = $request->withAttribute('firebase_user', [
+                'email' => 'admin@system.local',
+                'admin' => true
+            ]);
+            return $handler->handle($request);
+        }
+
         $authHeader = $request->getHeaderLine('Authorization');
         $idToken = str_replace('Bearer ', '', $authHeader);
 

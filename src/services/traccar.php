@@ -15,7 +15,7 @@ class Traccar {
 
         $this->client = new Client([
             'base_uri' => 'https://' . $baseUrl . '/api/',
-            'timeout'  => 5.0,
+            'timeout'  => 30000,
             'verify' => false,
             'headers' => [
                 'Accept' => 'application/json',

@@ -5,7 +5,7 @@ namespace App\Services;
 use Kreait\Firebase\Factory;
 use SensitiveParameter;
 
-class FirebaseProvider {
+class Firebase {
     private readonly \Kreait\Firebase\Contract\Auth $auth;
     private readonly \Kreait\Firebase\Contract\Messaging $messaging;
 

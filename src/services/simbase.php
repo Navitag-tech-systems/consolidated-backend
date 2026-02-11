@@ -23,7 +23,7 @@ class Simbase {
         // 2. Initialize Client with V2 Base URI
         $this->client = new Client([
             'base_uri' => 'https://api.simbase.com/v2/', //
-            'timeout'  => 5.0,
+            'timeout'  => 30000,
             'verify'   => false, // Keep false for local dev, set to true in production
             'headers' => [
                 'Authorization' => "Bearer {$this->apiKey}", //
@@ -57,14 +57,6 @@ class Simbase {
         try {
             $response = $this->client->request('GET', "simcards/{$iccid}");
             $data = json_decode($response->getBody()->getContents(), true);
-
-            // Backwards compatibility mapping (Optional, helps if frontend expects old keys)
-            if (isset($data['name'])) {
-                $data['device_name'] = $data['name']; // Map v2 'name' to v1 'device_name'
-            }
-            if (isset($data['state'])) {
-                $data['status'] = $data['state']; // Map v2 'state' to 'status'
-            }
 
             return $data;
         } catch (GuzzleException $e) {
