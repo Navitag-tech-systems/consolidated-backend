@@ -8,7 +8,7 @@ use App\Services\MysqlDatabase;
 use App\Services\Traccar;
 use App\Services\Simbase;
 use App\Services\FirebaseProvider; // New Service
-// use App\Middleware\FirebaseAuthMiddleware; // New Middleware
+use App\Middleware\FirebaseAuthMiddleware; // New Middleware
 
 require __DIR__ . '/vendor/autoload.php';
 
