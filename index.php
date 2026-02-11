@@ -10,6 +10,14 @@ use App\Services\Simbase;
 use App\Services\FirebaseProvider; // New Service
 use App\Middleware\FirebaseAuthMiddleware; // New Middleware
 
+
+// 1. Force Debugging
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+try {
+
 require __DIR__ . '/vendor/autoload.php';
 
 
@@ -48,9 +56,8 @@ $app->addErrorMiddleware(true, true, true);
  */
 //$app->add($container->get(FirebaseAuthMiddleware::class));
 
-/**
- * POST /status
- */
+
+# POST /status
 $app->post('/status', function (Request $request, Response $response) {
     $data = $request->getParsedBody();
     $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_TEST_URL'];
@@ -90,9 +97,8 @@ $app->post('/status', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-/**
- * GET /status-test (Same as above but GET for easy browser testing)
- */
+
+# GET /status-test (Same as above but GET for easy browser testing)
 $app->get('/status-test', function (Request $request, Response $response) {
     $serverUrl = $_ENV['TRACCAR_TEST_URL'];
     
@@ -131,9 +137,8 @@ $app->get('/status-test', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-/**
- * POST /users/sync
- */
+
+# POST /users/sync
 $app->post('/users/sync', function (Request $request, Response $response) {
     $data = $request->getParsedBody();
     $serverUrl = $data['server_url'] ?? null;
@@ -170,9 +175,8 @@ $app->post('/users/sync', function (Request $request, Response $response) {
     }
 });
 
-/**
- * POST /users/update
- */
+
+# POST /users/update
 $app->post('/users/update', function (Request $request, Response $response) {
     $data = $request->getParsedBody();
     $db = $this->get('db');
@@ -201,9 +205,8 @@ $app->post('/users/update', function (Request $request, Response $response) {
     }
 });
 
-/**
- * POST /users/delete
- */
+
+# POST /users/delete
 $app->post('/users/delete', function (Request $request, Response $response) {
     $data = $request->getParsedBody();
     $db = $this->get('db');
@@ -223,9 +226,8 @@ $app->post('/users/delete', function (Request $request, Response $response) {
     }
 });
 
-/**
- * POST /device/add
- */
+
+# POST /device/add
 $app->post('/device/add', function (Request $request, Response $response) {
     $data = $request->getParsedBody();
     $db = $this->get('db');
@@ -258,10 +260,9 @@ $app->post('/device/add', function (Request $request, Response $response) {
     }
 });
 
-/**
- * POST /server/token
- * Returns a temporary Traccar login token.
- 
+
+# POST /server/token
+/* 
 $app->post('/server/token', function (Request $request, Response $response) {
     // 1. Identify User (from Firebase Middleware)
     $firebaseUser = $request->getAttribute('firebase_user');
@@ -302,3 +303,15 @@ $app->post('/server/token', function (Request $request, Response $response) {
 */
 
 $app->run();
+
+
+} catch (Exception $e) {
+    // Catch any initialization errors
+    header('Content-Type: application/json');
+    echo json_encode([
+        'error' => 'Initialization failed',
+        'message' => $e->getMessage()
+    ]);
+    exit(1);
+}
+?>
