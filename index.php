@@ -46,7 +46,7 @@ $app->addErrorMiddleware(true, true, true);
  * Uncomment the line below to protect all routes under this API.
  * Ensure you have created src/middleware/FirebaseAuthMiddleware.php first.
  */
-// $app->add($container->get(FirebaseAuthMiddleware::class));
+//$app->add($container->get(FirebaseAuthMiddleware::class));
 
 /**
  * POST /status
@@ -59,17 +59,30 @@ $app->post('/status', function (Request $request, Response $response) {
     $simbase = $this->get('simbase');
     $traccar = ($this->get('traccarFactory'))($serverUrl);
 
+    // Mysql Check
+    $mysqlRes = $db->fetchOne("SELECT 1 as alive");
+    $mysqlStatus = isset($mysqlRes['error']) 
+        ? ['status' => 'error', 'message' => $mysqlRes['message']] 
+        : ['status' => 'online'];
+
+    // Traccar Check
+    $traccarRes = $traccar->getServerInfo();
+    $traccarStatus = isset($traccarRes['error']) 
+        ? ['status' => 'error', 'message' => $traccarRes['message']] 
+        : ['status' => 'online', 'version' => $traccarRes['version'] ?? 'unknown'];
+
+    // Simbase Check
+    $simbaseRes = $simbase->getAccountBalance();
+    $simbaseStatus = isset($simbaseRes['error']) 
+        ? ['status' => 'error', 'message' => $simbaseRes['errors'] ?? 'Unknown'] 
+        : ['status' => 'online', 'balance' => $simbaseRes['balance'] ?? 0];
+
     $results = [
         'timestamp' => date('c'),
         'services' => [
-            'mysql' => $db->fetchOne("SELECT 1 as alive") 
-                       |> (fn($res) => isset($res['error']) ? ['status' => 'error', 'message' => $res['message']] : ['status' => 'online']),
-            
-            'traccar' => $traccar->getServerInfo() 
-                         |> (fn($info) => isset($info['error']) ? ['status' => 'error', 'message' => $info['message']] : ['status' => 'online', 'version' => $info['version'] ?? 'unknown']),
-            
-            'simbase' => $simbase->getAccountBalance() 
-                         |> (fn($bal) => isset($bal['error']) ? ['status' => 'error', 'message' => $bal['errors'] ?? 'Unknown'] : ['status' => 'online', 'balance' => $bal['balance'] ?? 0])
+            'mysql'   => $mysqlStatus,
+            'traccar' => $traccarStatus,
+            'simbase' => $simbaseStatus
         ]
     ];
 
@@ -77,25 +90,40 @@ $app->post('/status', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
+/**
+ * GET /status-test (Same as above but GET for easy browser testing)
+ */
 $app->get('/status-test', function (Request $request, Response $response) {
-    //$data = $request->getParsedBody();
-    $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_TEST_URL'];
+    $serverUrl = $_ENV['TRACCAR_TEST_URL'];
     
     $db = $this->get('db');
     $simbase = $this->get('simbase');
     $traccar = ($this->get('traccarFactory'))($serverUrl);
 
+    // Mysql Check
+    $mysqlRes = $db->fetchOne("SELECT 1 as alive");
+    $mysqlStatus = isset($mysqlRes['error']) 
+        ? ['status' => 'error', 'message' => $mysqlRes['message']] 
+        : ['status' => 'online'];
+
+    // Traccar Check
+    $traccarRes = $traccar->getServerInfo();
+    $traccarStatus = isset($traccarRes['error']) 
+        ? ['status' => 'error', 'message' => $traccarRes['message']] 
+        : ['status' => 'online', 'version' => $traccarRes['version'] ?? 'unknown'];
+
+    // Simbase Check
+    $simbaseRes = $simbase->getAccountBalance();
+    $simbaseStatus = isset($simbaseRes['error']) 
+        ? ['status' => 'error', 'message' => $simbaseRes['errors'] ?? 'Unknown'] 
+        : ['status' => 'online', 'balance' => $simbaseRes['balance'] ?? 0];
+
     $results = [
         'timestamp' => date('c'),
         'services' => [
-            'mysql' => $db->fetchOne("SELECT 1 as alive") 
-                       |> (fn($res) => isset($res['error']) ? ['status' => 'error', 'message' => $res['message']] : ['status' => 'online']),
-            
-            'traccar' => $traccar->getServerInfo() 
-                         |> (fn($info) => isset($info['error']) ? ['status' => 'error', 'message' => $info['message']] : ['status' => 'online', 'version' => $info['version'] ?? 'unknown']),
-            
-            'simbase' => $simbase->getAccountBalance() 
-                         |> (fn($bal) => isset($bal['error']) ? ['status' => 'error', 'message' => $bal['errors'] ?? 'Unknown'] : ['status' => 'online', 'balance' => $bal['balance'] ?? 0])
+            'mysql'   => $mysqlStatus,
+            'traccar' => $traccarStatus,
+            'simbase' => $simbaseStatus
         ]
     ];
 
@@ -120,9 +148,7 @@ $app->post('/users/sync', function (Request $request, Response $response) {
 
     try {
         // PHP 8.5 string manipulation
-        $encodedPassword = base64_encode($data['email']) 
-                           |> (fn($s) => strtr($s, '+/', '-_')) 
-                           |> (fn($s) => rtrim($s, '='));
+        $encodedPassword = rtrim(strtr(base64_encode($data['email']), '+/', '-_'), '=');
         
         $traccarUser = $traccar->createUser([
             'name' => $data['email'],
@@ -235,7 +261,7 @@ $app->post('/device/add', function (Request $request, Response $response) {
 /**
  * POST /server/token
  * Returns a temporary Traccar login token.
- */
+ 
 $app->post('/server/token', function (Request $request, Response $response) {
     // 1. Identify User (from Firebase Middleware)
     $firebaseUser = $request->getAttribute('firebase_user');
@@ -252,17 +278,14 @@ $app->post('/server/token', function (Request $request, Response $response) {
     
     $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_DEFAULT_URL'];
 
-    // 2. Re-calculate the "Encoded Password" (Same logic as user creation)
-    $password = base64_encode($firebaseemail) 
-                |> (fn($s) => strtr($s, '+/', '-_')) 
-                |> (fn($s) => rtrim($s, '='));
+    // 2. Re-calculate the "Encoded Password" (Fixed: No pipe operator)
+    $password = rtrim(strtr(base64_encode($firebaseemail), '+/', '-_'), '=');
 
     // 3. Get Traccar Token
-    $data = $request->getParsedBody();
-    $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_DEFAULT_URL'];
-    
     $traccar = ($this->get('traccarFactory'))($serverUrl);
-    $token = $traccar->createUserToken($email, $password);
+    
+    // Fixed: used $firebaseemail instead of undefined $email
+    $token = $traccar->createUserToken($firebaseemail, $password);
 
     if (is_array($token) && isset($token['error'])) {
         $response->getBody()->write(json_encode($token));
@@ -276,5 +299,6 @@ $app->post('/server/token', function (Request $request, Response $response) {
     ]));
     return $response->withHeader('Content-Type', 'application/json');
 })->add($container->get(FirebaseAuthMiddleware::class));
+*/
 
 $app->run();
