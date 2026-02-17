@@ -47,18 +47,8 @@ class Traccar {
      */
     public function createUser(array $userData) {
         try {
-            // Default settings for new users
-            $payload = array_merge([
-                'id' => -1,
-                'disabled' => false,
-                'admin' => false,
-                'map' => 'osm',
-                'deviceLimit' => -1,
-                'expirationTime' => null,
-            ], $userData);
-
             $response = $this->client->request('POST', 'users', [
-                'json' => $payload
+                'json' => $userData
             ]);
 
             return json_decode($response->getBody()->getContents(), true);
@@ -78,6 +68,25 @@ class Traccar {
             
             $response = $this->client->request('PUT', "users/{$id}", [
                 'json' => $userData
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to update user', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * GEt an existing User
+     * @param int $id The Traccar User ID
+     * @param array $userData Fields to update
+     */
+    public function getUser(int $id) {
+        try {
+            $userData['id'] = $id; // ID is required in the body for PUT requests
+            
+            $response = $this->client->request('GET', "users/{$id}", [
+                'query' => ['userId' => $id]
             ]);
 
             return json_decode($response->getBody()->getContents(), true);

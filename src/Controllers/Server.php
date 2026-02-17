@@ -95,37 +95,31 @@ class Server {
   public function generateToken(Request $request, Response $response){
     // 1. Identify User (from Firebase Middleware)
     $firebaseUser = $request->getAttribute('firebase_user');
-    $firebaseemail = $firebaseUser['email'];
     $data = $request->getParsedBody();
-
-    if($data["email"] !== $firebaseemail) {
-        $response->getBody()->write(json_encode([
-            'error' => 'Email mismatch',
-            'message' => 'The email provided does not match the authenticated Firebase user.'
-        ]));
-        return $response->withStatus(403);
-    }
 
     $serverUrl = $data['server_url'] ?? $_ENV['TRACCAR_DEFAULT_URL'];
 
     // 2. Re-calculate the "Encoded Password" (Fixed: No pipe operator)
-    $password = rtrim(strtr(base64_encode($firebaseemail), '+/', '-_'), '=');
+    $password = rtrim(strtr(base64_encode($firebaseUser['email']), '+/', '-_'), '=');
 
     // 3. Get Traccar Token
     $traccar = ($this->container->get('traccar'))($serverUrl);
 
     // Fixed: used $firebaseemail instead of undefined $email
-    $token = $traccar->createUserToken($firebaseemail, $password);
+    $token = $traccar->createUserToken($firebaseUser['email'], $password);
 
     if (is_array($token) && isset($token['error'])) {
         $response->getBody()->write(json_encode($token));
         return $response->withStatus(500);
     }
 
+    $db = $this->container->get('db');
+    $dbUser = $db->execute("UPDATE users SET server_token = ? WHERE auth_uid = ? ", [$token, $firebaseUser['sub']]);
+
     // 4. Return Token to Frontend
     $response->getBody()->write(json_encode([
         'status' => 'success',
-        'traccar_token' => $token
+        'server_token' => $token
     ]));
     return $response->withHeader('Content-Type', 'application/json');
   }

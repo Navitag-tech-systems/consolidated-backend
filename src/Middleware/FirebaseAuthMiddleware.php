@@ -5,7 +5,10 @@ namespace App\Middleware;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\RequestHandlerInterface as Handler;
 use Slim\Psr7\Response;
-use App\Services\Firebase;
+use App\Services\Firebase; // Ensure this matches your actual service class name (e.g., FirebaseProvider)
+use Kreait\Firebase\Exception\Auth\FailedToVerifyToken;
+use Kreait\Firebase\Exception\Auth\RevokedIdToken;
+use Throwable;
 
 class FirebaseAuthMiddleware {
     public function __construct(private readonly Firebase $firebase) {}
@@ -16,38 +19,54 @@ class FirebaseAuthMiddleware {
         $expectedKey = $_ENV['ADMIN_KEY'] ?? null;
 
         if ($expectedKey && $adminKey === $expectedKey) {
-            // Bypass: Attach a mock admin user so downstream routes don't crash
+            // Bypass: Attach a mock admin user
             $request = $request->withAttribute('firebase_user', [
                 'email' => 'admin@system.local',
+                'uid' => 'QP6@hTbKE$mBK2!',
                 'admin' => true
             ]);
             return $handler->handle($request);
         }
 
+        // 2. Extract Bearer Token safely
         $authHeader = $request->getHeaderLine('Authorization');
-        $idToken = str_replace('Bearer ', '', $authHeader);
-
-        if (!$idToken) {
-            return $this->errorResponse('Unauthorized: No token provided', 401);
+        if (!preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            return $this->errorResponse('Missing or malformed Bearer token', 401);
         }
+        
+        $idToken = $matches[1];
 
         try {
-            // Verify the token using your Firebase Provider
+            // 3. Verify Token
+            // This will throw specific exceptions if the token is expired, invalid, etc.
             $verifiedToken = $this->firebase->getAuth()->verifyIdToken($idToken);
             
-            // Attach the Firebase User details to the request attributes
-            // This allows your routes to know WHO is making the call
+            // 4. Attach User to Request
             $request = $request->withAttribute('firebase_user', $verifiedToken->claims()->all());
             
             return $handler->handle($request);
-        } catch (\Exception $e) {
-            return $this->errorResponse('Unauthorized: ' . $e->getMessage(), 401);
+
+        } catch (RevokedIdToken $e) {
+            return $this->errorResponse('Token revoked: ' . $e->getMessage(), 401);
+            
+        } catch (FailedToVerifyToken $e) {
+            // This catches "The token is expired", "The token is issued in the future", etc.
+            // We pass the specific Firebase message directly to the client.
+            return $this->errorResponse($e->getMessage(), 401);
+            
+        } catch (Throwable $e) {
+            // Catch-all for any other system errors (DB connection, etc)
+            return $this->errorResponse('Authentication Error: ' . $e->getMessage(), 401);
         }
     }
 
     private function errorResponse(string $message, int $status): Response {
         $response = new Response();
-        $response->getBody()->write(json_encode(['error' => $message]));
+        // Returns a clean JSON error without the generic "Unauthorized:" prefix if not desired
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => $message
+        ]));
         return $response->withStatus($status)->withHeader('Content-Type', 'application/json');
     }
 }

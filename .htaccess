@@ -1,4 +1,12 @@
 RewriteEngine On
+
+# --- START FIX: Force Authorization Header ---
+# This ensures the Bearer token reaches your PHP middleware
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+# --- END FIX ---
+
+
 RewriteBase /v1/
 
 # ----------------------------------------------------------------------

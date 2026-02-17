@@ -52,23 +52,30 @@ $app->get('/', function (Request $request, Response $response) {
     return $response;
 });
 
+$app->get('/authcheck', function (Request $request, Response $response) {
+    $firebaseUser = $request->getAttribute('firebase_user');
+    $response->getBody()->write(json_encode($firebaseUser));
+    return $response;
+});
+
+
 # POST /server/status
 $app->post('/server/status', [Server::class, 'serverInfo']);
 
 # POST /server/token
-$app->post('/server/token', [Server::class, 'generateToken'])->add($container->get(FirebaseAuthMiddleware::class));
+$app->post('/server/token', [Server::class, 'generateToken']);
 
 # GET /server/test (Same as above but GET for easy browser testing)
 $app->get('/server/test', [Server::class, 'testServer']);
 
 # POST /users/sync
-$app->post('/users/sync', [User::class, 'sync']);
+$app->post('/user/sync', [User::class, 'sync']);
 
 # POST /users/update
-$app->post('/users/update', [User::class, 'update']);
+$app->post('/user/update', [User::class, 'update']);
 
 # POST /users/delete
-$app->post('/users/delete', [User::class, 'delete']);
+$app->post('/user/delete', [User::class, 'delete']);
 
 # POST /inventory/linkDevice -> links and activates a device to the user's account.
 $app->post('/inventory/linkDevice', function (Request $request, Response $response) {
@@ -202,7 +209,8 @@ $app->post('/inventory/addDevice', function (Request $request, Response $respons
         $response->getBody()->write(json_encode(['error' => $e->getMessage()]));
         return $response->withHeader('Content-Type', 'application/json')->withStatus(500);
     }
-})->add($container->get(FirebaseAuthMiddleware::class));
+});
+
 
 $app->run();
 ?>
