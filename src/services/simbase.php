@@ -65,15 +65,6 @@ class Simbase {
     }
 
     /**
-     * Get Sim Name
-     * Field: 'name' (previously 'device_name')
-     */
-    public function getSimName(string $iccid) {
-        $details = $this->getSimDetails($iccid);
-        return $details['name'] ?? $details['device_name'] ?? 'Unknown Device'; //
-    }
-
-    /**
      * Update Sim Name
      * Endpoint: PATCH /v2/simcards/{iccid}
      * Body: { "name": "New Name" }
@@ -97,12 +88,12 @@ class Simbase {
     public function setSimState(string $iccid, string $state) {
         // V2 uses 'state' instead of 'sim_state'
         // Ensure state is valid for V2 (usually 'enabled', 'disabled', or 'active')
-        if (!in_array($state, ['enabled', 'disabled', 'active', 'suspended'])) {
+        if (!in_array($state, ['enabled', 'disabled'])) {
              return ['error' => 'Invalid state. Use enabled or disabled.'];
         }
 
         try {
-            $response = $this->client->request('PATCH', "simcards/{$iccid}", [
+            $response = $this->client->request('POST', "simcards/{$iccid}/state", [
                 'json' => ['state' => $state] //
             ]);
             return json_decode($response->getBody()->getContents(), true);
