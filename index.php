@@ -11,6 +11,7 @@ use App\Services\Firebase;
 use App\Middleware\FirebaseAuthMiddleware;
 use App\Controllers\Server;
 use App\Controllers\User;
+use App\Controllers\Device;
 
 require __DIR__ . '/vendor/autoload.php';
 
@@ -33,6 +34,14 @@ $container->set('traccar', function () {
         return new Traccar($domain);
     };
 });
+
+// timescale postgres database
+$container->set('timescale', function () {
+    return function (string $host) {
+        return new PostgresDatabase($host);
+    };
+});
+
 
 // 3. Initialize Slim App
 AppFactory::setContainer($container);
@@ -65,6 +74,12 @@ $app->post('/server/status', [Server::class, 'serverInfo']);
 # POST /server/token
 $app->post('/server/token', [Server::class, 'generateToken']);
 
+# POST to enable linked device and set expiration
+$app->post('/device/enable', [Device::class, 'enable']);
+
+# POST to disable any device in simbase
+$app->post('/device/disable', [Device::class, 'disable']);
+
 # GET /server/test (Same as above but GET for easy browser testing)
 $app->get('/server/test', [Server::class, 'testServer']);
 
@@ -77,30 +92,39 @@ $app->post('/user/update', [User::class, 'update']);
 # POST /users/delete
 $app->post('/user/delete', [User::class, 'delete']);
 
-# POST /inventory/linkDevice -> links and activates a device to the user's account.
-$app->post('/inventory/linkDevice', function (Request $request, Response $response) {
+# POST /inventory/linkDevice -> links device to the user's account must have new device name, device imei, firebase token
+$app->POST('/user/link-device', function (Request $request, Response $response) {
+    $firebaseUser = $request->getAttribute('firebase_user');
     $data = $request->getParsedBody();
     $db = $this->get('db');
-    $simbase = $this->get('simbase');
-    $traccar = ($this->get('traccar'))($data['server_url']);
 
-    $device = $db->fetchOne("SELECT server_ref, sim_iccid, server_user_assigned FROM device_inventory WHERE imei = ?", [$data['imei']]);
+    $user = $db->fetchOne("SELECT server_url, server_id from users WHERE auth_uid = ?", [$firebaseUser['sub']]);
+    $device = $db->fetchOne("SELECT server_url, server_ref, sim_iccid, server_user_id FROM device_inventory WHERE imei = ?", [$data['imei']]);
 
-    if (!$device || !empty($device['server_user_assigned'])) {
+    if(isset($user['error']) || empty($user) ){
+        $response->getBody()->write(json_encode(["error" => $user]));
+        return $response->withStatus(400);
+    }
+
+    if($user['server_url'] != $device['server_url']){
+        $response->getBody()->write(json_encode(["error" => "User and Device mismatch"]));
+        return $response->withStatus(400);
+    }
+
+    $traccar = ($this->get('traccar'))($user['server_url']);
+
+    if (!$device || !empty($device['server_user_id'])) {
         $response->getBody()->write(json_encode(["error" => "Device unavailable or already assigned"]));
         return $response->withStatus(400);
     }
 
     try {
         // Link Traccar
-        $traccar->updateDevice((int)$device['server_ref'], ['name' => $data['name'], 'uniqueId' => $data['imei']]);
-        $traccar->linkUserToDevice((int)$data['server_id'], (int)$device['server_ref']);
-
-        // Enable SIM
-        $simbase->setSimState($device['sim_iccid'], 'enabled');
+        $traccar->updateDevice((int)$device['server_ref'], ['name' => $data['name']]);
+        $traccar->linkUserToDevice((int)$user['server_id'], (int)$device['server_ref']);
 
         // Update MySQL
-        $db->execute("UPDATE device_inventory SET server_user_assigned = ? WHERE imei = ?", [$data['id'], $data['imei']]);
+        $db->execute("UPDATE device_inventory SET server_user_id = ? WHERE imei = ?", [$user['server_id'], $data['imei']]);
 
         $response->getBody()->write(json_encode(["status" => "success"]));
         return $response->withHeader('Content-Type', 'application/json');
@@ -110,8 +134,9 @@ $app->post('/inventory/linkDevice', function (Request $request, Response $respon
     }
 });
 
+
 # POST /inventory/add -> adds a new device to the inventory (admin use)
-$app->post('/inventory/addDevice', function (Request $request, Response $response) {
+$app->post('/inventory/createRecord', function (Request $request, Response $response) {
     $brand = 'istartek';
     $model = 'VT100';
 
@@ -211,6 +236,71 @@ $app->post('/inventory/addDevice', function (Request $request, Response $respons
     }
 });
 
+
+# POST /history/positions
+# Body (JSON): {"date": "2023-10-27", "timezone": "Asia/Manila", "imei": 5 }
+$app->post('/history/positions', function (Request $request, Response $response) {
+    $data = $request->getParsedBody();
+
+    // 1. Validate Input (We no longer need server_id from input)
+    if (empty($data['imei']) || empty($data['date']) || empty($data['timezone'])) {
+        $response->getBody()->write(json_encode(['error' => 'Missing required fields: imei, date, timezone']));
+        return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+    }
+
+    // 2. Securely Identity User via Firebase Token
+    $firebaseUser = $request->getAttribute('firebase_user');
+    $db = $this->get('db');
+
+    // 3. Check Device Ownership
+    $device = $db->fetchOne("SELECT server_ref, server_url, server_user_id FROM device_inventory WHERE imei = ?", [$data['imei']]);
+
+    if (!$device) {
+        $response->getBody()->write(json_encode(['error' => 'Device not found']));
+        return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
+    }
+    
+    //check for admin previlages and device ownership
+    if($firebaseUser['email'] != 'superadmin@navitag.com'){
+        // Fetch the user row using the Firebase UID (sub)
+        $user = $db->fetchOne("SELECT id, server_id FROM users WHERE auth_uid = ?", [$firebaseUser['sub']]);
+
+        if (!$user) {
+            $response->getBody()->write(json_encode(['error' => 'User not found in database. Please sync app.']));
+            return $response->withStatus(403)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Strict Ownership Check:
+        // Ensure this matches how you saved it in /linkDevice. 
+        if ($device['server_user_id'] != $user['server_id']) {
+            $response->getBody()->write(json_encode(['error' => 'Unauthorized: Device not assigned to you']));
+            return $response->withStatus(403)->withHeader('Content-Type', 'application/json');
+        }
+    } 
+
+    try {
+        // 4. Calculate UTC Window
+        $localTimeZone = new DateTimeZone($data['timezone']);
+        $utcTimeZone = new DateTimeZone('UTC');
+
+        $startDate = new DateTime($data['date'] . ' 00:00:00', $localTimeZone);
+        $endDate   = new DateTime($data['date'] . ' 23:59:59', $localTimeZone);
+
+        $startUtc = $startDate->setTimezone($utcTimeZone)->format('Y-m-d\TH:i:s\Z');
+        $endUtc   = $endDate->setTimezone($utcTimeZone)->format('Y-m-d\TH:i:s\Z');
+
+        // 5. Fetch from Traccar
+        $traccar = ($this->get('traccar'))($device['server_url']);
+        $positions = $traccar->getPositions((int)$device['server_ref'], $startUtc, $endUtc);
+
+        $response->getBody()->write(json_encode($positions));
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode(['error' => 'Processing failed', 'message' => $e->getMessage()]));
+        return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
+    }
+});
 
 $app->run();
 ?>

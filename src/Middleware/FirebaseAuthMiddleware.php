@@ -21,7 +21,7 @@ class FirebaseAuthMiddleware {
         if ($expectedKey && $adminKey === $expectedKey) {
             // Bypass: Attach a mock admin user
             $request = $request->withAttribute('firebase_user', [
-                'email' => 'admin@system.local',
+                'email' => 'superadmin@navitag.com',
                 'uid' => 'QP6@hTbKE$mBK2!',
                 'admin' => true
             ]);

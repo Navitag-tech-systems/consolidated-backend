@@ -4,13 +4,14 @@ namespace App\Controllers;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Container\ContainerInterface;
 use Exception;
 
 
 class Server {
   protected $container;
 
-  public function __construct($container) {
+  public function __construct(ContainerInterface $container) {
     $this->container = $container;
   }
 

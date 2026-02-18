@@ -41,7 +41,7 @@ class User {
                 "administrator" => false,
                 "password" => $encodedPassword, // Required for creation AND updates
                 "deviceLimit" => -1,
-                "userLimit" => -1,
+                "userLimit" => 0,
                 "limitCommands" => true,
                 "attributes" => ["auth_sub" => $firebaseUser['sub']]
             ];

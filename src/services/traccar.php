@@ -266,4 +266,29 @@ class Traccar {
             return ['error' => 'Failed to generate token', 'message' => $e->getMessage()];
         }
     }
+
+    /**
+     * Fetch a list of positions for a specific device within a time range.
+     * * @param int $deviceId The unique Traccar Device ID
+     * @param string $from Start time in ISO 8601 format (e.g., '2023-01-01T08:00:00Z')
+     * @param string $to End time in ISO 8601 format
+     * @return array List of position objects
+     */
+
+    public function getPositions(int $deviceId, string $from, string $to) {
+        try {
+            // Traccar API expects 'deviceId', 'from', and 'to' as query parameters
+            $response = $this->client->request('GET', 'positions', [
+                'query' => [
+                    'deviceId' => $deviceId,
+                    'from' => $from,
+                    'to' => $to
+                ]
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (GuzzleException $e) {
+            return ['error' => 'Failed to fetch positions', 'message' => $e->getMessage()];
+        }
+    }
 }
