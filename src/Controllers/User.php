@@ -244,6 +244,39 @@ class User {
             return $this->jsonResponse($response, ["error" => $e->getMessage()], 500);
         }
     }
+    
+
+    /**
+     * POST /user/fcm-token
+     * Body: { "fcm_token": "..." }
+     */
+    public function saveFcmToken(Request $request, Response $response): Response {
+        $firebaseUser = $request->getAttribute('firebase_user'); // Get UID from middleware
+        $data = $request->getParsedBody();
+        $fcmToken = $data['fcm_token'] ?? null;
+
+        if (!$fcmToken) {
+            return $this->jsonResponse($response, ["error" => "fcm_token is required"], 400);
+        }
+
+        try {
+            $db = $this->container->get('db');
+            
+            // Update the fcm_token field for the user matching the firebase sub
+            $result = $db->execute(
+                "UPDATE users SET fcm_token = ? WHERE auth_uid = ?", 
+                [$fcmToken, $firebaseUser['sub']]
+            );
+
+            return $this->jsonResponse($response, [
+                "status" => "success",
+                "message" => "FCM token updated successfully"
+            ]);
+        } catch (\Exception $e) {
+            return $this->jsonResponse($response, ["error" => $e->getMessage()], 500);
+        }
+    }
+
     /**
      * Helper to standardize JSON responses
      */

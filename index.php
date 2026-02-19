@@ -12,6 +12,7 @@ use App\Middleware\FirebaseAuthMiddleware;
 use App\Controllers\Server;
 use App\Controllers\User;
 use App\Controllers\Device;
+use App\Controllers\Notification;
 
 require __DIR__ . '/vendor/autoload.php';
 
@@ -24,6 +25,7 @@ $container = new Container();
 
 $container->set('db', fn() => new MysqlDatabase());
 $container->set('simbase', fn() => new Simbase());
+$container->set(Notification::class, fn($c) => new Notification($c));
 
 // Firebase Service Registration
 $container->set(Firebase::class, fn() => new Firebase());
@@ -91,6 +93,9 @@ $app->post('/user/update', [User::class, 'update']);
 
 # POST /users/delete
 $app->post('/user/delete', [User::class, 'delete']);
+
+# POST to save/update user FCM token
+$app->post('/user/fcm-token', [User::class, 'saveFcmToken']);
 
 # POST /inventory/linkDevice -> links device to the user's account must have new device name, device imei, firebase token
 $app->POST('/user/link-device', function (Request $request, Response $response) {
@@ -301,6 +306,10 @@ $app->post('/history/positions', function (Request $request, Response $response)
         return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
     }
 });
+
+
+# POST /notification/send
+$app->post('/notification/send', [Notification::class, 'send']);
 
 $app->run();
 ?>
