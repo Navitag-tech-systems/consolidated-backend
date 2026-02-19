@@ -124,4 +124,47 @@ class Server {
     ]));
     return $response->withHeader('Content-Type', 'application/json');
   }
+
+/**
+ * Retrieves country and network information for a specific SIM/Device
+ * using the Simbase Service.
+ */
+public function getCountryInfo(Request $request, Response $response) {
+    // 1. Get query parameters
+    $queryParams = $request->getQueryParams();
+    $code = $queryParams['code'] ?? null;
+
+    // Validation: Ensure code is provided
+    if (empty($code)) {
+        $response->getBody()->write(json_encode(['error' => 'Country code parameter is required.']));
+        return $response->withStatus(400);
+    }
+
+    // 2. Get the DB instance from the container
+    $db = $this->container->get('db');
+
+    // 3. Fetch from MySQL where country_code matches the query param
+    // Note: Change 'countries' to your actual table name if it is different
+    $countryData = $db->fetchOne("SELECT * FROM country_servers WHERE country_code = ?", [$code]);
+
+    // 4. Handle database errors (based on your MysqlDatabase.php structure)
+    if (isset($countryData['error'])) {
+        return $this->jsonResponse($response, [
+            'error' => 'Database error occurred.',
+            'details' => $countryData['message']
+        ], 500);
+    }
+
+    // 5. Handle empty results (no matching country found)
+    if (empty($countryData)) {
+        $response->getBody()->write(json_encode(['error' => 'Coutry code no match.']));
+        return $response->withStatus(400);
+    }
+
+    // 6. Return successful response
+    return $this->jsonResponse($response, [
+        'status' => 'success',
+        'data' => $countryData
+    ], 200);
+}
 }

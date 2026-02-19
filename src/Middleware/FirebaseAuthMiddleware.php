@@ -13,7 +13,19 @@ use Throwable;
 class FirebaseAuthMiddleware {
     public function __construct(private readonly Firebase $firebase) {}
 
+    private $excludedRoutes = [
+        '/v1/server/country-code'
+    ];
+
     public function __invoke(Request $request, Handler $handler): Response {
+        $path = $request->getUri()->getPath();
+
+        // Check if current path is in the excluded list
+        if (in_array($path, $this->excludedRoutes)) {
+            return $handler->handle($request);
+        }
+
+
         // 1. Check for Admin Key Bypass
         $adminKey = $request->getHeaderLine('X-Admin-Key');
         $expectedKey = $_ENV['ADMIN_KEY'] ?? null;

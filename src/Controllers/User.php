@@ -20,15 +20,26 @@ class User {
      */
     public function sync(Request $request, Response $response) {
         $firebaseUser = $request->getAttribute('firebase_user');
-
         $data = $request->getParsedBody();
 
-        if (!isset($data['server_url'])) {
-            return $this->jsonResponse($response, ["error" => "server_url is required"], 400);
+        if (!isset($data['country_code'])) {
+            return $this->jsonResponse($response, ["error" => "country_code is required"], 400);
         }
 
+        // get server url based on country code
         $db = $this->container->get('db');
-        $traccar = ($this->container->get('traccar'))($data['server_url']);
+        $countryData = $db->fetchOne("SELECT * FROM country_servers WHERE country_code = ?", [$data['country_code']]);
+
+        if (isset($countryData['error'])) {
+            return $this->jsonResponse($response, [
+                'error' => 'Database error occurred.',
+                'details' => $countryData['message']
+            ], 500);
+        }
+
+        if (empty($countryData)) {
+            return $this->jsonResponse($response, ['error' => 'Invalid country code or no server assigned to this region.'], 404);
+        }
 
         try {   
             // Build Traccar user object
@@ -56,29 +67,27 @@ class User {
             // ======================================================
             if(count($dbCheck) < 1 ){     
                 try {
+                    $traccar = ($this->container->get('traccar'))($countryData['server_url']);
+
                     // Try to create the user in Traccar
                     $traccarUser = $traccar->createUser($userArray);
                     
                     if (isset($traccarUser['error'])) {
-                        throw new Exception($traccarUser['message']);
+                        throw new \Exception($traccarUser['message']);
                     }   
-                } catch(Exception $tcreate) {
+                } catch(\Exception $tcreate) {
                     // GAP 2: Handle Duplicate Key (Account Linking)
-                    // Check if error is due to email already existing in Traccar
                     if (str_contains($tcreate->getMessage(), 'duplicate key') || str_contains($tcreate->getMessage(), 'Unique index or primary key violation')) {
-                        // User exists in Traccar, but we don't have the ID. TODO: Connect directly to postgrest
-
                         return $this->jsonResponse($response, ["error" => 'User email exists on Traccar, but account could not be retrieved for linking.'], 500);
                     } else {
-                        // Genuine non-duplicate error (e.g., server down, invalid data)
                         return $this->jsonResponse($response, ["error" => "Traccar Error: " . $tcreate->getMessage()], 500);
                     }
                 }
                 
                 // Insert into MySQL
-                $dbrows = "email, auth_uid, server_id, server_url";
-                $dbvalues = "?, ?, ?, ?";
-                $inserts = [ $firebaseUser['email'], $firebaseUser['sub'], $traccarUser['id'], $data['server_url'] ];
+                $dbrows = "email, auth_uid, server_id, server_url, country_code";
+                $dbvalues = "?, ?, ?, ?, ?";
+                $inserts = [ $firebaseUser['email'], $firebaseUser['sub'], $traccarUser['id'], $countryData['server_url'], $data['country_code'] ];
 
                 if(isset($data['phone']) ){ 
                     $dbrows .= ", phone";
@@ -86,6 +95,7 @@ class User {
                     array_push($inserts, $data['phone']);
                 }  
 
+                // Note: If 'name' is also a column in your MySQL users table, you should add it to the insert query above.
                 $dbinsert = $db->execute("INSERT INTO users({$dbrows}) VALUES ({$dbvalues})", $inserts);
                 
                 if(isset($dbinsert['error']) ){
@@ -94,8 +104,11 @@ class User {
                 } else {
                     return $this->jsonResponse($response, [
                         "status" => "success", 
-                        "server_id" => $traccarUser['id'],
-                        "internal_id" => $dbinsert["last_insert_id"] // Standardize on your DB wrapper's return key
+                        //"server_id" => $traccarUser['id'],
+                        //"internal_id" => $dbinsert["last_insert_id"],
+                        "server_url" => $countryData['server_url'],
+                        "name" => $userArray['name'] ?? null,
+                        "phone" => $userArray['phone'] ?? null
                     ], 201);
                 }
 
@@ -109,8 +122,8 @@ class User {
             // CASE 3: User exists in local DB (Sync/Refresh)
             // ======================================================
             } else {
-                
                 $localUser = $dbCheck[0];
+                $traccar = ($this->container->get('traccar'))($countryData['server_url']); 
                 $traccar_id = $localUser['server_id'];
 
                 try {
@@ -120,17 +133,25 @@ class User {
                         // 90% sure that user does not exsist. So create user and and update DB
                         $traccarUser = $traccar->createUser($userArray);
                         if (isset($traccarUser['error'])) {
-                            throw new Exception($traccarUser['message']);
+                            throw new \Exception($traccarUser['message']);
                         }
-                        $db->execute("UPDATE users SET server_id = ? WHERE id = ?", [ $traccarUser['id'], $localUser['id'] ]);
+                        $updateResult = $db->execute("UPDATE users SET server_id = ? WHERE id = ?", [ $traccarUser['id'], $localUser['id'] ]);
+
+                        if (isset($updateResult['error'])) {
+                            $traccar->deleteUser($traccarUser['id']);
+                            throw new \Exception("Database Sync Error: " . $updateResult['error']);
+                        }
 
                         return $this->jsonResponse($response, [
                             "status" => "success", 
-                            "server_id" => $traccarUser['id'],
-                            "internal_id" => $localUser['id'], 
+                            //"server_id" => $traccarUser['id'],
+                            //"internal_id" => $localUser['id'],
+                            "server_url" => $localUser['server_url'] ?? $countryData['server_url'],
+                            "name" => $localUser['name'] ?? $traccarUser['name'] ?? null,
+                            "phone" => $localUser['phone'] ?? $traccarUser['phone'] ?? null
                         ], 200);
                     } else {
-                    // user exsists and is properly linked. update if there are changes
+                    // user exists and is properly linked. update if there are changes
                         $needsUpdate = false;
 
                         // Compare Name
@@ -148,7 +169,7 @@ class User {
                         // Compare Phone
                         if (($userArray['phone'] ?? '') !== ($traccarUser['phone'] ?? '')) {
                             $needsUpdate = true;
-                            $traccarUser['phone'] = $userArray['phone'];
+                            $traccarUser['phone'] = $userArray['phone'] ?? null;
                         }
 
                         // Compare Auth Sub (Attributes)
@@ -157,30 +178,37 @@ class User {
 
                         if ($localSub !== $remoteSub) {
                             $needsUpdate = true;
-                            $traccarUser['attributes']['auth_sub'] = $userArray['attributes']['auth_sub'];
+                            $traccarUser['attributes']['auth_sub'] = $localSub;
                         }
                         
                         if($needsUpdate){
-                            $traccar->updateUser($traccarUser["id"], $traccarUser);
+                            $updateCheck = $traccar->updateUser($traccarUser["id"], $traccarUser);
+                            if(isset($updateCheck['error'])) {
+                                throw new \Exception("Traccar update failed: " . $updateCheck['message']);
+                            }
                         }
 
+                        // ADDED MYSQL FIELDS HERE
                         $resObj = [
                             "status" => "success", 
-                            "server_id" => $traccarUser['id'],
-                            "internal_id" => $localUser['id'], 
+                            //"server_id" => $traccarUser['id'],
+                            //"internal_id" => $localUser['id'],
+                            "server_url" => $localUser['server_url'] ?? $countryData['server_url'],
+                            "name" => $localUser['name'] ?? $traccarUser['name'] ?? null,
+                            "phone" => $localUser['phone'] ?? $traccarUser['phone'] ?? null
                         ];
 
-                        if(isset($localUser["server_token"]) && $localUser["server_token"] !== null && $localUser["server_token"] !== ''){
+                        if(!empty($localUser["server_token"])){
                             $resObj['server_token'] = $localUser['server_token'];
                         }
 
                         return $this->jsonResponse($response, $resObj, 200);
                     }
-                } catch (Exception $e) {
+                } catch (\Exception $e) {
                     return $this->jsonResponse($response, ["error" => "Local user exists but Traccar sync failed: " . $e->getMessage()], 500);
                 }
             }
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse($response, ["error" => "System Error: " . $e->getMessage()], 500);
         }
     }
