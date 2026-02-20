@@ -49,6 +49,21 @@ $container->set('timescale', function () {
 AppFactory::setContainer($container);
 $app = AppFactory::create();
 
+// CORS Middleware
+$app->add(function ($request, $handler) {
+    $response = $handler->handle($request);
+    return $response
+        ->withHeader('Access-Control-Allow-Origin', '*') // Replace '*' with your actual domain for better security
+        ->withHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Origin, Authorization')
+        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+});
+
+// Handle OPTIONS preflight requests
+$app->options('/{routes:.+}', function ($request, $response, $args) {
+    return $response;
+});
+
+
 $app->setBasePath('/v1');
 $app->addBodyParsingMiddleware();
 $app->addErrorMiddleware(true, true, true);
