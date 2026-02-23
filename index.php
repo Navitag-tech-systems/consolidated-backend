@@ -44,32 +44,26 @@ $container->set('timescale', function () {
     };
 });
 
-
 // 3. Initialize Slim App
 AppFactory::setContainer($container);
 $app = AppFactory::create();
 
-// CORS Middleware
-$app->add(function ($request, $handler) {
-    $response = $handler->handle($request);
-    return $response
-        ->withHeader('Access-Control-Allow-Origin', '*') // Replace '*' with your actual domain for better security
-        ->withHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Origin, Authorization')
-        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-});
-
-// Handle OPTIONS preflight requests
-$app->options('/{routes:.+}', function ($request, $response, $args) {
-    return $response;
-});
-
-
 $app->setBasePath('/v1');
+
+// --- MIDDLEWARE STACK START ---
+// Note: Slim executes middleware in LIFO (Last In, First Out) order.
+// This means the middleware added LAST at the bottom of this file executes FIRST.
+
+// Inner middleware
 $app->addBodyParsingMiddleware();
 $app->addErrorMiddleware(true, true, true);
 
 # AUTHENTICATION LAYER
+// Since this is added before the CORS middleware, the CORS middleware will wrap it
+// and successfully intercept OPTIONS requests before they hit this Auth check.
 $app->add($container->get(FirebaseAuthMiddleware::class));
+
+// --- MIDDLEWARE STACK END ---
 
 $container->set(Server::class, fn($c) => new Server($c));
 
@@ -113,7 +107,7 @@ $app->post('/user/delete', [User::class, 'delete']);
 $app->post('/user/fcm-token', [User::class, 'saveFcmToken']);
 
 # POST /inventory/linkDevice -> links device to the user's account must have new device name, device imei, firebase token
-$app->POST('/user/link-device', function (Request $request, Response $response) {
+$app->post('/user/link-device', function (Request $request, Response $response) {
     $firebaseUser = $request->getAttribute('firebase_user');
     $data = $request->getParsedBody();
     $db = $this->get('db');
@@ -325,6 +319,43 @@ $app->post('/history/positions', function (Request $request, Response $response)
 
 # POST /notification/send
 $app->post('/notification/send', [Notification::class, 'send']);
+
+
+// ==========================================
+// CORS IMPLEMENTATION START
+// ==========================================
+
+// Catch-all route to serve a 200 response for OPTIONS requests.
+// This is required so the Slim router doesn't throw a "Method Not Allowed" error
+// on endpoints that are only configured for POST or GET.
+$app->options('/{routes:.+}', function (Request $request, Response $response, $args) {
+    return $response;
+});
+
+// CORS Middleware
+// Because this is added LAST, Slim's LIFO architecture executes this FIRST.
+// This intercepts the OPTIONS preflight request BEFORE it hits the FirebaseAuthMiddleware,
+// preventing CORS errors caused by missing auth tokens during preflight.
+$app->add(function (Request $request, $handler) use ($app) {
+    if ($request->getMethod() === 'OPTIONS') {
+        // Short-circuit: Immediately return an empty response for OPTIONS requests
+        $response = $app->getResponseFactory()->createResponse();
+    } else {
+        // Pass regular requests down the chain to the other middlewares/routes
+        $response = $handler->handle($request);
+    }
+
+    // Append CORS headers to EVERY response
+    return $response
+        ->withHeader('Access-Control-Allow-Origin', '*') // Note: For better security in production, replace '*' with 'https://your-frontend-domain.com'
+        ->withHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Origin, Authorization')
+        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+        ->withHeader('Access-Control-Allow-Credentials', 'true');
+});
+
+// ==========================================
+// CORS IMPLEMENTATION END
+// ==========================================
 
 $app->run();
 ?>

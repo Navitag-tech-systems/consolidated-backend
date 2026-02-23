@@ -217,36 +217,46 @@ class User {
      * POST /users/update
      */
     public function update(Request $request, Response $response) {
-        $data = $request->getParsedBody();
-        $db = $this->container->get('db');
-        
         try {
-            $localUser = $db->fetchOne("SELECT email FROM users WHERE id = ?", [$data['id']]);
-            if (!$localUser) {
-                throw new Exception("User not found");
+            $firebaseUser = $request->getAttribute('firebase_user');
+            $data = $request->getParsedBody();
+            $db = $this->container->get('db');
+
+            // 1. Secure lookup based on Firebase token
+            $localUser = $db->fetchOne("SELECT * FROM users WHERE auth_uid = ?", [$firebaseUser['sub']]);
+            if (!$localUser || empty($localUser)) {
+                return $this->jsonResponse($response, ["error" => "User not found"], 404);
             }
 
-            $traccar = ($this->container->get('traccar'))($data['server_url']);
-            $traccarResult = $traccar->updateUser((int)$data['server_id'], [
-                'name' => $data['name'] ?? $localUser['email'],
-                'email' => $localUser['email'],
-                'phone' => $data['mobile'] ?? null
+            // 2. Sanitize and prep data
+            $name = $data['name'] ?? $localUser['name'] ?? "user.".$firebaseUser['sub'];
+            $rawPhone = $data['phone'] ?? $localUser['phone'] ?? null;
+            $cleanPhone = $rawPhone ? str_replace([" ", "-"], "", $rawPhone) : null;
+
+            // 3. Update Traccar (Ensure required fields aren't dropped)
+            $traccar = ($this->container->get('traccar'))($localUser['server_url']);
+            $traccarResult = $traccar->updateUser((int)$localUser['server_id'], [
+                'name' => $name,
+                'email' => $localUser['email'], // Keep this so Traccar doesn't wipe it
+                'phone' => $cleanPhone
             ]);
 
             if (isset($traccarResult['error'])) {
-                throw new Exception($traccarResult['message']);
+                throw new \Exception("Traccar update failed: " . $traccarResult['message']);
             }
 
+            // 4. Update Local Database safely
             if (isset($data['name'])) {
-                $db->execute("UPDATE users SET name = ? WHERE id = ?", [$data['name'], $data['id']]);
+                $db->execute("UPDATE users SET name = ? WHERE id = ?", [$name, $localUser['id']]);
             }
-            if (isset($data['mobile'])) {
-                $db->execute("UPDATE users SET mobile = ? WHERE id = ?", [$data['mobile'], $data['id']]);
+            if (isset($data['phone'])) { // FIXED: Was 'mobile'
+                $db->execute("UPDATE users SET phone = ? WHERE id = ?", [$rawPhone, $localUser['id']]);
             }
             
             return $this->jsonResponse($response, ["status" => "success"]);
-        } catch (Exception $e) {
-            return $this->jsonResponse($response, ["error" => $e->getMessage()], 500);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse($response, ["error" => "System Error: " . $e->getMessage()], 500);
         }
     }
 
