@@ -54,10 +54,11 @@ class User {
                 "deviceLimit" => -1,
                 "userLimit" => 0,
                 "limitCommands" => true,
+                //"disableReports" => true // trun this on
                 "attributes" => ["auth_sub" => $firebaseUser['sub']]
             ];
 
-            if(isset($data['phone'])){ $userArray['phone'] = $data['phone']; }
+            if(isset($data['phone']) && $data['phone'] !== null && $data['phone'] !== ''){ $userArray['phone'] = $data['phone']; }
 
             // Check if user exists in local MySQL database
             $dbCheck = $db->fetchAll('SELECT * from users WHERE auth_uid = ?', [$firebaseUser['sub']]);
@@ -313,6 +314,19 @@ class User {
         } catch (\Exception $e) {
             return $this->jsonResponse($response, ["error" => $e->getMessage()], 500);
         }
+    }
+
+
+    public function deviceExp(Request $request, Response $response) {
+        $firebaseUser = $request->getAttribute('firebase_user');
+        $db = $this->container->get('db');
+
+        $exps = $db->fetchALL("SELECT server_ref, d.imei, d.expiration FROM device_inventory d JOIN users u ON d.server_user_id = u.server_id WHERE u.auth_uid = ?", [$firebaseUser['sub']]);
+
+        return $this->jsonResponse($response, [
+                "status" => "success",
+                "message" => $exps
+            ]);
     }
 
     /**

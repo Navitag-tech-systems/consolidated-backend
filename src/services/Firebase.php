@@ -27,4 +27,18 @@ class Firebase {
     public function getMessaging(): \Kreait\Firebase\Contract\Messaging {
         return $this->messaging;
     }
+
+    // Inside src/services/Firebase.php
+
+    public function createCustomToken($uid) 
+    {
+        try {
+            // Assuming you have the Kreait Firebase Auth instance initialized as $this->auth
+            $customToken = $this->auth->createCustomToken($uid);
+            return $customToken->toString();
+        } catch (\Exception $e) {
+            // Handle error (e.g., log it)
+            return null;
+        }
+    }
 }
