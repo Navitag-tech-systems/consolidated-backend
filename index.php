@@ -26,7 +26,7 @@ $container = new Container();
 
 $container->set('db', fn() => new MysqlDatabase());
 $container->set('simbase', fn() => new Simbase());
-$container-set('xendit', fn() => new Xendit());
+$container->set('xendit', fn() => new Xendit());
 $container->set(Notification::class, fn($c) => new Notification($c));
 
 // Firebase Service Registration
@@ -317,7 +317,8 @@ $app->post('/history/positions', function (Request $request, Response $response)
 $app->post('/notification/send', [Notification::class, 'send']);
 
 # POST create session xendit component
-$app->post('/transaction/create', function (Request $request, Response $response) {
+# POST create session xendit component
+$app->post('/transaction/create', function (Request $request, Response $response) use ($container) {
     // Get payload from the frontend request
     $firebaseUser = $request->getAttribute('firebase_user');
     $data = $request->getParsedBody();
@@ -325,16 +326,24 @@ $app->post('/transaction/create', function (Request $request, Response $response
     $db = $container->get('db');
     $xendit = $container->get('xendit');
 
-    // 1. Get User Country for Timezone Logic
-    $user = $db->fetchOne("SELECT * FROM users WHERE auth_uid = ?", [$firebaseUser['sub']]);
-
-    $transId = guidv4();
-    $name = $user["name"];
+    // Generate id for transaction reference
+    $ts = microtime(true);
     $userId = $firebaseUser['sub'];
-    $amount = $data['amount'] ?? 0;
+    $transId = $userId ."." . $ts;
+    
+    // Extract variables matching the frontend payload
+    $amount = $data['total'] ?? 0;
     $currency = $data['currency'] ?? 'USD';
-    $countryCode = $data['country'] ?? 'PH';
-    $origins = $request->getHeaderLine('Origin') ?? 'https://track.navitag.com'; // Default to your domain
+    $countryCode = $data['country'] ?? 'ID';
+    $type = $data['type'] ?? 'unknown';
+
+    // Customer details
+    $firstName = $data['customer']['firstName'] ?? '';
+    $lastName = $data['customer']['lastName'] ?? '';
+    $phone = $data['customer']['phone'] ?? '';
+    $email = $data['customer']['email'] ?? '';
+
+    $origins = $request->getHeaderLine('Origin') ?: 'https://track.navitag.com'; 
 
     // Basic Validation
     if (empty($userId) || $amount <= 0) {
@@ -346,34 +355,59 @@ $app->post('/transaction/create', function (Request $request, Response $response
     }
 
     try {
+        // 1. Initial Insert (Status: requested)
+        $db->execute(
+            'INSERT INTO transactions (trans_ref, user_ref, type, data, amount, currency, status) VALUES (?, ?, ?, ?, ?, ?, ?)', 
+            [$transId, $userId, $type, json_encode($data), $amount, $currency, 'requested']
+        );
+
+        // 2. Call Xendit API
         $xenditResponse = $xendit->createPaymentSession(
             $transId,
             $amount,
             $currency,
             $countryCode,
             $userId,
-            $name,
+            $firstName,
+            $lastName,
+            $email,
+            $phone,
             $origins
         );
 
-        // Check if Xendit request was successful
+        // 3. Handle Xendit Response
         if ($xenditResponse['success']) {
-            // save transaction record into db
+            // Retrieve the payment session ID from the Xendit response data
+            // Note: Depending on the specific API endpoint version, Xendit usually returns it as 'id' or 'payment_session_id'
+            $xenditRef = $xenditResponse['data']['id'] ?? $xenditResponse['data']['payment_session_id'] ?? null;
+
+            // Update record with Xendit reference and update the timestamp
             $db->execute(
-                'INSERT INTO transactions(id, user_ref, type, data, amount, currency, xendit_ref) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                [$transId, $userId, $data["type"] , json_encode($data["data"]), $amount, $currency, $xenditResponse["payment_session_id"]]
+                'UPDATE transactions SET xendit_ref = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+                [$xenditRef, $transId]
             );
 
             $response->getBody()->write(json_encode($xenditResponse));
             return $response->withHeader('Content-Type', 'application/json')->withStatus(200);
         } else {
-            // Xendit API rejected the payload (e.g., bad currency, invalid domain)
+            // Optional: You can also update the status to "failed" if Xendit rejects the payload
+            $db->execute(
+                'UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE trans_ref = ?', 
+                ['failed', $transId]
+            );
+
+            // Xendit API rejected the payload
             $response->getBody()->write(json_encode($xenditResponse));
             return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
         }
 
     } catch (\Exception $e) {
-        // Catch any fatal errors (e.g. database goes down)
+        // Catch any fatal errors and update the database status if possible
+        $db->execute(
+            'UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE trans_ref = ?', 
+            ['error', $transId]
+        );
+
         $response->getBody()->write(json_encode([
             'success' => false,
             'message' => 'Internal Server Error',
@@ -383,8 +417,7 @@ $app->post('/transaction/create', function (Request $request, Response $response
     }
 });
 
-
-$app->post('/api/auth/generate-web-token', function (Request $request, Response $response) use ($container) {
+$app->post('/user/generate-auth-token', function (Request $request, Response $response) use ($container) {
     // 1. Get the authenticated user's UID from the middleware
     $firebaseUser = $request->getAttribute('firebase_user');
     $uid = $firebaseUser['sub'] ?? null;
@@ -413,6 +446,35 @@ $app->post('/api/auth/generate-web-token', function (Request $request, Response 
     $response->getBody()->write(json_encode($responsePayload));
     return $response->withHeader('Content-Type', 'application/json')->withStatus(200);
 });
+
+
+$app->post('/shop/dataplans', function (Request $request, Response $response) use ($container) {
+    $data = $request->getParsedBody();
+    $db = $container->get('db');
+
+    //ADD error handling
+
+    $placeholders = implode(',', array_fill(0, count($data["models"]), '?'));
+    $plans = $db->fetchAll("SELECT * FROM data_plans WHERE model in ({$placeholders})", $data["models"]);
+
+    $response->getBody()->write(json_encode(["status" => "success", "message" => $plans]));
+    return $response->withHeader('Content-Type', 'application/json')->withStatus(200);
+});
+
+
+//Add the starting work for products search. display all products
+# POST /products/all
+
+$app->post('/products/all', function (Request $request, Response $response) use ($container) { 
+    $data = $request->getParsedBody(); // must pass country_code in json body
+    $db = $container->get('db');
+
+    $products = $db->fetchAll('SELECT * FROM products WHERE active = 1 AND (country IS NULL OR country = ?)', [$data["country_code"]] );
+
+    $response->getBody()->write(json_encode(["status" => "success", "message" => $products]));
+    return $response->withHeader('Content-Type', 'application/json')->withStatus(200);
+});
+
 
 //Helper Function
 function guidv4($data = null) {

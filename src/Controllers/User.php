@@ -86,7 +86,7 @@ class User {
                 }
                 
                 // Insert into MySQL
-                $dbrows = "email, auth_uid, server_id, server_url, country_code";
+                $dbrows = "email, auth_uid, server_id, server_url, country";
                 $dbvalues = "?, ?, ?, ?, ?";
                 $inserts = [ $firebaseUser['email'], $firebaseUser['sub'], $traccarUser['id'], $countryData['server_url'], $data['country_code'] ];
 

@@ -36,16 +36,8 @@ class Xendit
 
     /**
      * Create a Payment Request Session for the Xendit UI Component.
-     * * @param string $transId Your internal unique transaction/order ID
-     * @param float $amount The amount to charge
-     * @param string $currency The currency code (e.g., 'USD', 'PHP')
-     * @param string $countryCode ISO 3166-1 alpha-2 country code (e.g., 'US', 'PH')
-     * @param string $userId Your internal User ID
-     * @param string $name User's given name
-     * @param array|string $origins Array of domains where the component will be loaded (e.g., ['https://yourdomain.com'])
-     * @return array Array containing the Payment Request response
      */
-    public function createPaymentSession($transId, $amount, $currency, $countryCode, $userId, $name, $origins)
+    public function createPaymentSession($transId, $amount, $currency, $countryCode, $userId, $firstName, $lastName, $email, $phone, $origins)
     {
         // Ensure origins is an array as expected by Xendit
         if (!is_array($origins)) {
@@ -53,17 +45,18 @@ class Xendit
         }
 
         $payload = [
-            'reference_id' => (string) $transId,
+            'reference_id' => (string)"trans-". $transId,
             'session_type' => 'PAY',
             'mode' => 'COMPONENTS',
             'amount' => (float) $amount,
-            'currency' => $currency,
-            'country' => $countryCode,
+            'currency' => 'PHP', // 'USD',//$currency,
+            'country' => 'PH',
+            'allow_save_payment_method' => 'OPTIONAL', // Added to match your requested sample data
             'customer' => [
-                'reference_id' => (string) $userId,
+                'reference_id' => (string) "cx-". $transId,
                 'type' => 'INDIVIDUAL',
                 'individual_detail' => [
-                    'given_names' => $name
+                    'given_names' => $firstName
                 ]
             ],
             'components_configuration' => [
@@ -71,9 +64,20 @@ class Xendit
             ]
         ];
 
+        // Conditionally add optional fields so Xendit doesn't throw validation errors on nulls
+        if (!empty($lastName)) {
+            $payload['customer']['individual_detail']['surname'] = $lastName;
+        }
+        if (!empty($email)) {
+            $payload['customer']['email'] = $email;
+        }
+        /*if (!empty($phone)) {
+            $payload['customer']['mobile_number'] = $phone;
+        }*/
+
         try {
             // Send request to Xendit
-            $response = $this->client->post('payment_requests', [
+            $response = $this->client->post('sessions', [
                 'json' => $payload
             ]);
 
@@ -91,7 +95,8 @@ class Xendit
             return [
                 'success' => false,
                 'error' => $errorData,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
+                'data' => $payload
             ];
         }
     }
